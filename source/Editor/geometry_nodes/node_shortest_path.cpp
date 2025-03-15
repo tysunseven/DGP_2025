@@ -1,6 +1,9 @@
 #include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
 #include <cstddef>
 #include <string>
+#include <queue>
+#include <vector>
+#include <limits>
 
 #include "GCore/Components/MeshOperand.h"
 #include "GCore/GOP.h"
@@ -17,10 +20,76 @@ bool find_shortest_path(
     std::list<size_t>& shortest_path_vertex_indices,
     float& distance)
 {
-    // TODO: Implement the shortest path algorithm
-    // You need to fill in `shortest_path_vertex_indices` and `distance`
+    if (!start_vertex_handle.is_valid() || !end_vertex_handle.is_valid() ||
+        start_vertex_handle.idx() >= omesh.n_vertices() ||
+        end_vertex_handle.idx() >= omesh.n_vertices()) {
+        return false;
+    }
 
-    return false;
+    const size_t num_vertices = omesh.n_vertices();
+    std::vector<float> dist(
+        num_vertices, std::numeric_limits<float>::infinity());
+    std::vector<MyMesh::VertexHandle> prev(num_vertices);
+
+    auto cmp = [](const std::pair<float, MyMesh::VertexHandle>& a,
+                  const std::pair<float, MyMesh::VertexHandle>& b) {
+        return a.first > b.first;
+    };
+    std::priority_queue<
+        std::pair<float, MyMesh::VertexHandle>,
+        std::vector<std::pair<float, MyMesh::VertexHandle>>,
+        decltype(cmp)>
+        pq(cmp);
+
+    dist[start_vertex_handle.idx()] = 0.0f;
+    pq.emplace(0.0f, start_vertex_handle);
+
+    while (!pq.empty()) {
+        float current_dist = pq.top().first;
+        MyMesh::VertexHandle u = pq.top().second;
+        pq.pop();
+
+        if (u == end_vertex_handle)
+            break;
+        if (current_dist > dist[u.idx()])
+            continue;
+
+        for (MyMesh::ConstVertexVertexIter vv_it = omesh.cvv_iter(u);
+             vv_it.is_valid();
+             ++vv_it) {
+            MyMesh::VertexHandle v = *vv_it;
+            MyMesh::Point u_pos = omesh.point(u);
+            MyMesh::Point v_pos = omesh.point(v);
+            float edge_length = (u_pos - v_pos).length();
+
+            float new_dist = current_dist + edge_length;
+
+            if (new_dist < dist[v.idx()]) {
+                dist[v.idx()] = new_dist;
+                prev[v.idx()] = u;
+                pq.emplace(new_dist, v);
+            }
+        }
+    }
+
+    if (dist[end_vertex_handle.idx()] ==
+        std::numeric_limits<float>::infinity()) {
+        return false;
+    }
+
+    shortest_path_vertex_indices.clear();
+    distance = dist[end_vertex_handle.idx()];
+    MyMesh::VertexHandle current = end_vertex_handle;
+
+    while (current != start_vertex_handle) {
+        shortest_path_vertex_indices.push_front(current.idx());
+        current = prev[current.idx()];
+        if (!current.is_valid())
+            return false;
+    }
+    shortest_path_vertex_indices.push_front(start_vertex_handle.idx());
+
+    return true;
 }
 
 NODE_DEF_OPEN_SCOPE
