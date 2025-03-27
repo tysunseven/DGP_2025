@@ -109,7 +109,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 const std::string primvar_name =
                     "polyscope:vertex:scalar:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->FloatArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->vertex);
                 primvar.Set(values);
@@ -121,7 +121,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 const std::string primvar_name =
                     "polyscope:face:scalar:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->FloatArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->uniform);
                 primvar.Set(values);
@@ -132,7 +132,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 const std::string primvar_name =
                     "polyscope:vertex:color:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->Color3fArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->vertex);
                 primvar.Set(values);
@@ -143,7 +143,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 auto values = mesh->get_face_color_quantity(name);
                 const std::string primvar_name = "polyscope:face:color:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->Color3fArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->uniform);
                 primvar.Set(values);
@@ -155,7 +155,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 const std::string primvar_name =
                     "polyscope:vertex:vector:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->Vector3fArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->vertex);
                 primvar.Set(values);
@@ -167,7 +167,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 const std::string primvar_name =
                     "polyscope:face:vector:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->Vector3fArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->uniform);
                 primvar.Set(values);
@@ -180,7 +180,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 const std::string primvar_name =
                     "polyscope:face_corner:parameterization:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->TexCoord2fArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->faceVarying);
                 primvar.Set(values);
@@ -192,7 +192,7 @@ NODE_EXECUTION_FUNCTION(write_usd)
                 const std::string primvar_name =
                     "polyscope:vertex:parameterization:" + name;
                 auto primvar = primVarAPI.CreatePrimvar(
-                    pxr::TfToken(primvar_name),
+                    pxr::TfToken(primvar_name.c_str()),
                     pxr::SdfValueTypeNames->TexCoord2fArray);
                 primvar.SetInterpolation(pxr::UsdGeomTokens->vertex);
                 primvar.Set(values);

@@ -1,15 +1,15 @@
 #ifndef IMGUI_DEFINE_MATH_OPERATORS
 #define IMGUI_DEFINE_MATH_OPERATORS
 
-#include <string>
-
 #include "imgui_internal.h"
 
 #endif
 
 #include <pxr/usd/usdGeom/primvarsAPI.h>
+#include <pxr/usd/usdShade/materialBindingAPI.h>
 
 #include <cstddef>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -25,6 +25,7 @@
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
 #include "polyscope/screenshot.h"
+#include "polyscope/structure.h"
 #include "polyscope/surface_mesh.h"
 #include "polyscope/transformation_gizmo.h"
 #include "polyscope/view.h"
@@ -35,6 +36,8 @@
 #include "pxr/usd/usdGeom/curves.h"
 #include "pxr/usd/usdGeom/points.h"
 #include "pxr/usd/usdGeom/xform.h"
+#include "pxr/usd/usdShade/material.h"
+#include "stb_image.h"
 
 USTC_CG_NAMESPACE_OPEN_SCOPE
 
@@ -44,6 +47,9 @@ std::vector<std::pair<polyscope::Structure*, size_t>>
     PolyscopeRenderer::pick_result = { { nullptr, 0 },
                                        { nullptr, 0 },
                                        { nullptr, 0 } };
+
+std::map<std::pair<polyscope::Structure*, size_t>, polyscope::Structure*>
+    PolyscopeRenderer::visualization_structure_map;
 
 // int nPts = 2000;
 // float anotherParam = 0.0;
@@ -72,8 +78,9 @@ std::vector<std::pair<polyscope::Structure*, size_t>>
 //                                 // instead of full width. Must have
 //                                 // matching PopItemWidth() below.
 
-//     ImGui::InputInt("num points", &nPts);             // set a int variable
-//     ImGui::InputFloat("param value", &anotherParam);  // set a float variable
+//     ImGui::InputInt("num points", &nPts);             // set a int
+//     variable ImGui::InputFloat("param value", &anotherParam);  // set a
+//     float variable
 
 //     if (ImGui::Button("run subroutine")) {
 //         // executes when button is pressed
@@ -353,6 +360,168 @@ void RegisterMeshQuantities(
     }
 }
 
+void RegisterTextureQuantities(
+    const pxr::UsdPrim& prim,
+    polyscope::SurfaceMesh* surface_mesh)
+{
+    // 1. 获取材质绑定
+    pxr::UsdShadeMaterialBindingAPI bindingAPI(prim);
+    auto material = bindingAPI.GetDirectBinding().GetMaterial();
+    if (!material)
+        return;
+
+    // 2. 获取surface shader
+    auto surface = material.GetSurfaceOutput();
+    if (!surface)
+        return;
+
+    // 3. 获取PBR shader连接
+    pxr::UsdShadeConnectableAPI source;
+    pxr::TfToken sourceName;
+    pxr::UsdShadeAttributeType sourceType;
+    surface.GetConnectedSource(&source, &sourceName, &sourceType);
+
+    // 4. 获取diffuseColor输入
+    auto diffuseInput = source.GetInput(pxr::TfToken("diffuseColor"));
+    if (!diffuseInput)
+        return;
+
+    // 5. 获取texture sampler连接
+    diffuseInput.GetConnectedSource(&source, &sourceName, &sourceType);
+    if (!source)
+        return;
+
+    // 6. 从texture sampler获取文件路径
+    pxr::SdfAssetPath texturePath;
+    source.GetInput(pxr::TfToken("file")).Get(&texturePath);
+
+    // 获取实际文件路径
+    std::string textureFilePath = texturePath.GetAssetPath();
+    // std::cout << "Texture path: " << textureFilePath << std::endl;
+
+    // 7. 加载纹理
+    int width, height, channels;
+    unsigned char* data =
+        stbi_load(textureFilePath.c_str(), &width, &height, &channels, 4);
+    if (!data) {
+        std::cerr << "failed to load image from " << textureFilePath
+                  << std::endl;
+        return;
+    }
+
+    bool has_alpha = (channels == 4);
+
+    // 将数据转换为float数组
+    std::vector<std::array<float, 3>> image_color(width * height);
+    std::vector<std::array<float, 4>> image_color_alpha(width * height);
+    std::vector<float> image_scalar(width * height);
+
+    for (int j = 0; j < height; j++) {
+        for (int i = 0; i < width; i++) {
+            int pix_ind = (j * width + i) * 4;
+            unsigned char p_r = data[pix_ind + 0];
+            unsigned char p_g = data[pix_ind + 1];
+            unsigned char p_b = data[pix_ind + 2];
+            unsigned char p_a = 255;
+            if (channels == 4) {
+                p_a = data[pix_ind + 3];
+            }
+
+            // color
+            std::array<float, 3> val{ p_r / 255.f, p_g / 255.f, p_b / 255.f };
+            image_color[j * width + i] = val;
+
+            // scalar
+            image_scalar[j * width + i] = (val[0] + val[1] + val[2]) / 3.;
+
+            // color alpha
+            std::array<float, 4> val_a{
+                p_r / 255.f, p_g / 255.f, p_b / 255.f, p_a / 255.f
+            };
+            image_color_alpha[j * width + i] = val_a;
+        }
+    }
+
+    try {
+        // 获取 UV 属性名称，从 primvar 中查找
+        auto primVarAPI = pxr::UsdGeomPrimvarsAPI(prim);
+        auto primvars = primVarAPI.GetPrimvars();
+
+        for (const auto& primvar : primvars) {
+            std::string full_name = primvar.GetName();
+            if (full_name.find("primvars:polyscope:") == 0) {
+                std::string name_without_prefix = full_name.substr(19);
+
+                // 对顶点 UV
+                if (name_without_prefix.find("vertex:parameterization:") == 0) {
+                    std::string uv_name = name_without_prefix.substr(24);
+                    surface_mesh->addTextureColorQuantity(
+                        "vertex texture color " + uv_name,
+                        uv_name,
+                        width,
+                        height,
+                        image_color,
+                        polyscope::ImageOrigin::UpperLeft);
+
+                    surface_mesh->addTextureScalarQuantity(
+                        "vertex texture scalar " + uv_name,
+                        uv_name,
+                        width,
+                        height,
+                        image_scalar,
+                        polyscope::ImageOrigin::UpperLeft);
+
+                    if (has_alpha) {
+                        surface_mesh->addTextureColorQuantity(
+                            "vertex texture color alpha " + uv_name,
+                            uv_name,
+                            width,
+                            height,
+                            image_color_alpha,
+                            polyscope::ImageOrigin::UpperLeft);
+                    }
+                }
+
+                // 对面角 UV
+                if (name_without_prefix.find("face_corner:parameterization:") ==
+                    0) {
+                    std::string uv_name = name_without_prefix.substr(29);
+                    surface_mesh->addTextureColorQuantity(
+                        "face corner texture color " + uv_name,
+                        uv_name,
+                        width,
+                        height,
+                        image_color,
+                        polyscope::ImageOrigin::UpperLeft);
+
+                    surface_mesh->addTextureScalarQuantity(
+                        "face corner texture scalar " + uv_name,
+                        uv_name,
+                        width,
+                        height,
+                        image_scalar,
+                        polyscope::ImageOrigin::UpperLeft);
+
+                    if (has_alpha) {
+                        surface_mesh->addTextureColorQuantity(
+                            "face corner texture color alpha " + uv_name,
+                            uv_name,
+                            width,
+                            height,
+                            image_color_alpha,
+                            polyscope::ImageOrigin::UpperLeft);
+                    }
+                }
+            }
+        }
+    }
+    catch (std::exception& e) {
+        std::cerr << e.what() << std::endl;
+    }
+
+    stbi_image_free(data);
+}
+
 void PolyscopeRenderer::RegisterGeometryFromPrim(const pxr::UsdPrim& prim)
 {
     // Register structures from stage
@@ -362,18 +531,6 @@ void PolyscopeRenderer::RegisterGeometryFromPrim(const pxr::UsdPrim& prim)
 
     auto xform = xform_cache.GetLocalToWorldTransform(prim);
     auto primTypeName = prim.GetTypeName().GetString();
-
-    // Remove pick result if the structure is picked
-    for (auto& result : pick_result) {
-        if (result.first != nullptr &&
-            result.first->name == prim.GetPath().GetString()) {
-            result = { nullptr, 0 };
-        }
-    }
-    if (curr_visualization_structure != nullptr) {
-        curr_visualization_structure->remove();
-        curr_visualization_structure = nullptr;
-    }
 
     // If the prim already exists, the type of the prim may have changed
     // Remove the existing prim and re-register it
@@ -414,6 +571,7 @@ void PolyscopeRenderer::RegisterGeometryFromPrim(const pxr::UsdPrim& prim)
             std::move(faceVertexIndicesNested));
         surface_mesh->setTransform(glm::make_mat4(xform.GetArray()));
         RegisterMeshQuantities(mesh, surface_mesh);
+        RegisterTextureQuantities(prim, surface_mesh);
     }
     else if (primTypeName == "Points") {
         polyscope::removeStructure("Surface Mesh", prim.GetPath().GetString());
@@ -462,12 +620,38 @@ void PolyscopeRenderer::RegisterGeometryFromPrim(const pxr::UsdPrim& prim)
 
 void PolyscopeRenderer::UpdateStructures(DirtyPathSet paths)
 {
-    // if (paths.size() > 0) {
-    //     std::cout << "Update structures: " << std::endl;
-    //     for (const auto& path : paths) {
-    //         std::cout << path.GetString() << std::endl;
-    //     }
-    // }
+    // As the structure will be removed and re-registered, the pointer to the
+    // structure will be invalid.
+    // So we need to remember the information of the structure, and then
+    // set selection on the new structure
+    std::vector<std::tuple<std::string, std::string, size_t>> picked_info;
+    picked_info.resize(3);
+    for (int i = 0; i < 3; i++) {
+        auto structure = pick_result[i].first;
+        if (structure != nullptr) {
+            picked_info[i] = { structure->getName(),
+                               structure->typeName(),
+                               pick_result[i].second };
+        }
+    }
+
+    std::
+        map<std::tuple<std::string, std::string, size_t>, polyscope::Structure*>
+            visualization_structure_info;
+    for (const auto& [pickResult, structure] : visualization_structure_map) {
+        visualization_structure_info[{ pickResult.first->getName(),
+                                       pickResult.first->typeName(),
+                                       pickResult.second }] = structure;
+    }
+
+    std::tuple<std::string, std::string, size_t> polyscope_picked_info;
+    if (polyscope::pick::getSelection().first != nullptr) {
+        auto structure = polyscope::pick::getSelection().first;
+        polyscope_picked_info = { structure->getName(),
+                                  structure->typeName(),
+                                  polyscope::pick::getSelection().second };
+    }
+
     xform_cache = pxr::UsdGeomXformCache(stage_->get_current_time());
 
     for (const auto& path : dirty_paths) {
@@ -478,6 +662,45 @@ void PolyscopeRenderer::UpdateStructures(DirtyPathSet paths)
             continue;
         }
         RegisterGeometryFromPrim(prim);
+    }
+
+    // Reset selection on the new structure
+    for (int i = 0; i < 3; i++) {
+        auto [name, type, index] = picked_info[i];
+        if (polyscope::hasStructure(type, name)) {
+            auto structure = polyscope::getStructure(type, name);
+            if (structure->isEnabled()) {
+                structure->drawPick();
+                pick_result[i] = { structure, index };
+            }
+            else {
+                pick_result[i] = { nullptr, 0 };
+            }
+        }
+        else {
+            pick_result[i] = { nullptr, 0 };
+        }
+    }
+
+    visualization_structure_map.clear();
+    for (const auto& [pickResult, structure] : visualization_structure_info) {
+        auto [name, type, index] = pickResult;
+        if (polyscope::hasStructure(type, name)) {
+            auto new_structure = polyscope::getStructure(type, name);
+            visualization_structure_map[{ new_structure, index }] = structure;
+        }
+    }
+
+    auto [name, type, index] = polyscope_picked_info;
+    if (polyscope::hasStructure(type, name)) {
+        auto structure = polyscope::getStructure(type, name);
+        if (structure->isEnabled()) {
+            structure->drawPick();
+            polyscope::pick::setSelection({ structure, index });
+        }
+        else {
+            polyscope::pick::resetSelection();
+        }
     }
 }
 
@@ -499,7 +722,10 @@ void PolyscopeRenderer::DrawFrame()
     {
         stage_listener.GetDirtyPaths(dirty_paths);
     }
-    UpdateStructures(dirty_paths);
+    if (!dirty_paths.empty()) {
+        UpdateStructures(dirty_paths);
+    }
+
     GetFrameBuffer();
 
     ImVec2 imgui_frame_size =
@@ -541,83 +767,101 @@ void PolyscopeRenderer::VisualizePickVertexGizmo(
     //     return;
     // }
 
-    // 若选中的东西为空，则删除当前的polyscope::structure
+    // 若选中的东西为空，直接返回
     if (pickResult.first == nullptr) {
-        if (curr_visualization_structure != nullptr) {
-            curr_visualization_structure->remove();
-            curr_visualization_structure = nullptr;
+        return;
+    }
+
+    if (visualization_structure_map.find(pickResult) ==
+        visualization_structure_map.end()) {
+        visualization_structure_map[pickResult] = nullptr;
+    }
+
+    polyscope::Structure*& curr_visualization_structure =
+        visualization_structure_map[pickResult];
+
+    // 若选中的东西不为空，则创建一个polyscope::structure
+    if (curr_visualization_structure != nullptr) {
+        if (curr_visualization_structure == pickResult.first) {
+            return;
+        }
+        curr_visualization_structure->remove();
+        curr_visualization_structure = nullptr;
+    }
+    // 得到选中的东西的类型
+    auto type = pickResult.first->typeName();
+    auto transform = pickResult.first->getTransform();
+    if (type == "Surface Mesh") {
+        // 检查选中的是顶点、面、边、半边还是角
+        auto surface_mesh =
+            dynamic_cast<polyscope::SurfaceMesh*>(pickResult.first);
+        auto ind = pickResult.second;
+        // 仅当选中的是顶点时，才创建一个点云
+        if (ind < surface_mesh->nVertices()) {
+            // 获取顶点坐标
+            auto pos = surface_mesh->vertexPositions.getValue(ind);
+            // 根据顶点坐标创建一个transform
+            transform = glm::translate(transform, pos);
+            // 创建一个点云
+            std::vector<glm::vec3> points;
+            points.push_back({ 0, 0, 0 });
+            std::string v_struc_name = pickResult.first->getName() +
+                                       "__vertex__" + std::to_string(ind);
+            curr_visualization_structure =
+                polyscope::registerPointCloud(v_struc_name, points)
+                    ->setEnabled(false)
+                    ->setTransformationGizmoEnabled(true);
         }
     }
-    else {
-        // 若选中的东西不为空，则创建一个polyscope::structure
-        if (curr_visualization_structure != nullptr) {
-            if (curr_visualization_structure == pickResult.first) {
-                return;
-            }
-            curr_visualization_structure->remove();
-            curr_visualization_structure = nullptr;
-        }
-        // 得到选中的东西的类型
-        auto type = pickResult.first->typeName();
-        auto transform = pickResult.first->getTransform();
-        if (type == "Surface Mesh") {
-            // 检查选中的是顶点、面、边、半边还是角
-            auto surface_mesh =
-                dynamic_cast<polyscope::SurfaceMesh*>(pickResult.first);
-            auto ind = pickResult.second;
-            // 仅当选中的是顶点时，才创建一个点云
-            if (ind < surface_mesh->nVertices()) {
-                // 获取顶点坐标
-                auto pos = surface_mesh->vertexPositions.getValue(ind);
-                // 根据顶点坐标创建一个transform
-                transform = glm::translate(transform, pos);
-                // 创建一个点云
-                std::vector<glm::vec3> points;
-                points.push_back({ 0, 0, 0 });
-                curr_visualization_structure =
-                    polyscope::registerPointCloud("picked point", points)
-                        ->setEnabled(false)
-                        ->setTransformationGizmoEnabled(true);
-            }
-        }
-        else if (type == "Point Cloud") {
-            auto point_cloud =
-                dynamic_cast<polyscope::PointCloud*>(pickResult.first);
-            auto ind = pickResult.second;
-            auto pos = point_cloud->getPointPosition(ind);
+    else if (type == "Point Cloud") {
+        auto point_cloud =
+            dynamic_cast<polyscope::PointCloud*>(pickResult.first);
+        auto ind = pickResult.second;
+        auto pos = point_cloud->getPointPosition(ind);
+        std::vector<glm::vec3> points;
+        points.push_back(pos);
+        std::string v_struc_name =
+            pickResult.first->getName() + "__point__" + std::to_string(ind);
+        curr_visualization_structure =
+            polyscope::registerPointCloud(v_struc_name, points)
+                ->setEnabled(false)
+                ->setTransformationGizmoEnabled(true);
+    }
+    else if (type == "Curve Network") {
+        auto curve_network =
+            dynamic_cast<polyscope::CurveNetwork*>(pickResult.first);
+        auto ind = pickResult.second;
+        if (ind < curve_network->nNodes()) {
+            auto pos = curve_network->nodePositions.getValue(ind);
             std::vector<glm::vec3> points;
             points.push_back(pos);
+            std::string v_struc_name =
+                pickResult.first->getName() + "__node__" + std::to_string(ind);
             curr_visualization_structure =
                 polyscope::registerPointCloud("picked point", points)
                     ->setEnabled(false)
                     ->setTransformationGizmoEnabled(true);
         }
-        else if (type == "Curve Network") {
-            auto curve_network =
-                dynamic_cast<polyscope::CurveNetwork*>(pickResult.first);
-            auto ind = pickResult.second;
-            if (ind < curve_network->nNodes()) {
-                auto pos = curve_network->nodePositions.getValue(ind);
-                std::vector<glm::vec3> points;
-                points.push_back(pos);
-                curr_visualization_structure =
-                    polyscope::registerPointCloud("picked point", points)
-                        ->setEnabled(false)
-                        ->setTransformationGizmoEnabled(true);
-            }
-        }
-        else {
-            // TODO
-        }
-        if (curr_visualization_structure != nullptr) {
-            curr_visualization_structure->setTransform(transform);
-        }
+    }
+    else {
+        // TODO
+    }
+    if (curr_visualization_structure != nullptr) {
+        curr_visualization_structure->setTransform(transform);
     }
 }
 
 void PolyscopeRenderer::UpdatePickStructure(
     std::pair<polyscope::Structure*, size_t> pickResult)
 {
+    if (visualization_structure_map.find(pickResult) ==
+        visualization_structure_map.end()) {
+        visualization_structure_map[pickResult] = nullptr;
+    }
+
+    polyscope::Structure*& curr_visualization_structure =
+        visualization_structure_map[pickResult];
+
     if (pickResult.first == nullptr ||
         curr_visualization_structure == nullptr) {
         return;
@@ -681,8 +925,9 @@ void PolyscopeRenderer::ProcessInputEvents()
                     widgetCapturedMouse = tg->interactCustom(windowPos);
                     if (widgetCapturedMouse) {
                         input_transform_triggered = true;
-                        if (curr_visualization_structure) {
-                            UpdatePickStructure(pick_result[2]);
+                        for (auto& [pickResult, structure] :
+                             visualization_structure_map) {
+                            UpdatePickStructure(pickResult);
                         }
                         break;
                     }
@@ -836,10 +1081,13 @@ void PolyscopeRenderer::ProcessInputEvents()
                     pick_result[0] = { nullptr, 0 };
                     pick_result[1] = { nullptr, 0 };
                     pick_result[2] = { nullptr, 0 };
-                    if (curr_visualization_structure != nullptr) {
-                        curr_visualization_structure->remove();
-                        curr_visualization_structure = nullptr;
+                    // Clear visualization_structure_map
+                    for (auto& [key, value] : visualization_structure_map) {
+                        if (value != nullptr) {
+                            value->remove();
+                        }
                     }
+                    visualization_structure_map.clear();
                 }
                 drag_distSince_last_release = 0.0;
             }
