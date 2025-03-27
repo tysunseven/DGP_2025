@@ -20,20 +20,23 @@ bool find_shortest_path(
     std::list<size_t>& shortest_path_vertex_indices,
     float& distance)
 {
+    // 参数合法性检查
     if (!start_vertex_handle.is_valid() || !end_vertex_handle.is_valid() ||
         start_vertex_handle.idx() >= omesh.n_vertices() ||
         end_vertex_handle.idx() >= omesh.n_vertices()) {
         return false;
     }
 
-    const size_t num_vertices = omesh.n_vertices();
+    const size_t num_vertices = omesh.n_vertices(); // 顶点个数
+    // dist数组 记录从起点到每个顶点的最短距离，初始值为无穷大（表示不可达）
     std::vector<float> dist(
         num_vertices, std::numeric_limits<float>::infinity());
+    // prev数组 记录每个顶点的前驱顶点，用于回溯路径
     std::vector<MyMesh::VertexHandle> prev(num_vertices);
 
     auto cmp = [](const std::pair<float, MyMesh::VertexHandle>& a,
                   const std::pair<float, MyMesh::VertexHandle>& b) {
-        return a.first > b.first;
+        return a.first > b.first; // 最小堆（升序排列）
     };
     std::priority_queue<
         std::pair<float, MyMesh::VertexHandle>,
@@ -50,20 +53,23 @@ bool find_shortest_path(
         pq.pop();
 
         if (u == end_vertex_handle)
-            break;
+            break; // 找到终点，提前终止
         if (current_dist > dist[u.idx()])
-            continue;
+            continue; // 跳过旧数据
 
+        // 遍历当前顶点u的所有邻接顶点v
         for (MyMesh::ConstVertexVertexIter vv_it = omesh.cvv_iter(u);
              vv_it.is_valid();
              ++vv_it) {
             MyMesh::VertexHandle v = *vv_it;
+            // 计算边权（顶点坐标的几何距离）
             MyMesh::Point u_pos = omesh.point(u);
             MyMesh::Point v_pos = omesh.point(v);
             float edge_length = (u_pos - v_pos).length();
 
             float new_dist = current_dist + edge_length;
 
+            // 松弛操作：更新更短路径
             if (new_dist < dist[v.idx()]) {
                 dist[v.idx()] = new_dist;
                 prev[v.idx()] = u;
@@ -74,7 +80,7 @@ bool find_shortest_path(
 
     if (dist[end_vertex_handle.idx()] ==
         std::numeric_limits<float>::infinity()) {
-        return false;
+        return false; // 终点不可达
     }
 
     shortest_path_vertex_indices.clear();
