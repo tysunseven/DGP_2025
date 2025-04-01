@@ -99,7 +99,6 @@ PolyscopeRenderer::PolyscopeRenderer(Stage* stage)
       stage_listener(stage_)
 {
     // polyscope::options::buildGui = false;
-    polyscope::options::automaticallyComputeSceneExtents = false;
     polyscope::init();
     // polyscope::view::bgColor = { 1.0, 1.0, 1.0, 1.0 };
     // Test register a structure
@@ -117,6 +116,8 @@ PolyscopeRenderer::PolyscopeRenderer(Stage* stage)
         dirty_paths.insert(prim.GetPath());
     }
     UpdateStructures(dirty_paths);
+    polyscope::updateStructureExtents();
+    polyscope::options::automaticallyComputeSceneExtents = false;
 }
 
 PolyscopeRenderer::~PolyscopeRenderer()

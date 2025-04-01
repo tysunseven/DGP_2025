@@ -25,3 +25,9 @@
   [作业三分析](./assignment3/analysis.md)
 
   Deadline: 23:59, 2025-03-29
+
+- [作业四](./assignment4/README.md)：网格分割 
+
+  [作业四分析](./assignment4/analysis.md)
+
+  Deadline: 23:59, 2025-04-09
