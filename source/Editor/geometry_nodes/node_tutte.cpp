@@ -1,5 +1,8 @@
 #include <Eigen/Sparse>
+#include <vector>
 #include <cmath>
+#include <unordered_map>
+#include <iostream>
 
 #include "GCore/Components/MeshOperand.h"
 #include "OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh"
@@ -9,45 +12,93 @@ typedef OpenMesh::TriMesh_ArrayKernelT<> MyMesh;
 
 void tutte_embedding(MyMesh& omesh)
 {
-    // TODO: Implement Tutte Embedding Algorithm.
-    //
-    // In this task, you are required to **modify** the original mesh to a
-    // 'minimal surface' mesh with the boundary of the input mesh as its
-    // boundary.
-    //
-    // Specifically, the positions of the boundary vertices of the input mesh
-    // should be fixed. By solving a global Laplace equation on the mesh,
-    // recalculate the coordinates of the vertices inside the mesh to achieve
-    // the minimal surface configuration
+    // Separate internal and boundary vertices
+    std::vector<MyMesh::VertexHandle> internal_vertices;
+    std::vector<MyMesh::VertexHandle> boundary_vertices;
 
-    /*
-     ** Algorithm Pseudocode for Minimal Surface Calculation
-     ** ------------------------------------------------------------------------
-     ** 1. Initialize mesh with input boundary conditions.
-     **    - For each boundary vertex, fix its position.
-     **    - For internal vertices, initialize with initial guess if necessary.
-     **
-     ** 2. Construct Laplacian matrix for the mesh.
-     **    - Compute weights for each edge based on the chosen weighting scheme
-     **      (e.g., uniform weights for simplicity).
-     **    - Assemble the global Laplacian matrix.
-     **
-     ** 3. Solve the Laplace equation for interior vertices.
-     **    - Apply Dirichlet boundary conditions for boundary vertices.
-     **    - Solve the linear system (Laplacian * X = 0) to find new positions
-     **      for internal vertices.
-     **
-     ** 4. Update mesh geometry with new vertex positions.
-     **    - Ensure the mesh respects the minimal surface configuration.
-     **
-     ** Note: This pseudocode outlines the general steps for calculating a
-     ** minimal surface mesh given fixed boundary conditions using the Laplace
-     ** equation. The specific implementation details may vary based on the mesh
-     ** representation and numerical methods used.
-     **
-     */
+    for (MyMesh::VertexIter v_it = omesh.vertices_begin();
+         v_it != omesh.vertices_end();
+         ++v_it) {
+        if (omesh.is_boundary(*v_it)) {
+            boundary_vertices.push_back(*v_it);
+        }
+        else {
+            internal_vertices.push_back(*v_it);
+        }
+    }
 
-    return;
+    if (internal_vertices.empty())
+        return;
+
+    // Create mapping from internal vertices to indices
+    std::unordered_map<MyMesh::VertexHandle, int> vertex_to_index;
+    for (int i = 0; i < internal_vertices.size(); ++i) {
+        vertex_to_index[internal_vertices[i]] = i;
+    }
+
+    const int n = internal_vertices.size();
+    Eigen::SparseMatrix<double> A(n, n);
+    std::vector<Eigen::Triplet<double>> triplets;
+
+    Eigen::VectorXd B_x(n), B_y(n), B_z(n);
+    B_x.setZero();
+    B_y.setZero();
+    B_z.setZero();
+
+    // Build Laplace matrix and RHS vectors
+    for (int i = 0; i < internal_vertices.size(); ++i) {
+        MyMesh::VertexHandle vh = internal_vertices[i];
+        int degree = 0;
+        double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
+
+        for (MyMesh::VertexVertexIter vv_it = omesh.vv_begin(vh);
+             vv_it.is_valid();
+             ++vv_it) {
+            MyMesh::VertexHandle neighbor_vh = *vv_it;
+            if (omesh.is_boundary(neighbor_vh)) {
+                // Accumulate boundary neighbor positions
+                sum_x += omesh.point(neighbor_vh)[0];
+                sum_y += omesh.point(neighbor_vh)[1];
+                sum_z += omesh.point(neighbor_vh)[2];
+                degree++;
+            }
+            else {
+                // Add entry for internal neighbor
+                auto it = vertex_to_index.find(neighbor_vh);
+                if (it != vertex_to_index.end()) {
+                    int j = it->second;
+                    triplets.emplace_back(i, j, -1.0);
+                    degree++;
+                }
+            }
+        }
+
+        // Diagonal entry with degree
+        triplets.emplace_back(i, i, degree);
+
+        // Set RHS values
+        B_x[i] = sum_x;
+        B_y[i] = sum_y;
+        B_z[i] = sum_z;
+    }
+
+    A.setFromTriplets(triplets.begin(), triplets.end());
+
+    // Solve linear systems for each coordinate
+    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+    solver.compute(A);
+    if (solver.info() != Eigen::Success)
+        return;
+
+    Eigen::VectorXd X = solver.solve(B_x);
+    Eigen::VectorXd Y = solver.solve(B_y);
+    Eigen::VectorXd Z = solver.solve(B_z);
+
+    // Update vertex positions
+    for (int i = 0; i < internal_vertices.size(); ++i) {
+        MyMesh::VertexHandle vh = internal_vertices[i];
+        omesh.set_point(vh, MyMesh::Point(X[i], Y[i], Z[i]));
+    }
 }
 
 NODE_DEF_OPEN_SCOPE
