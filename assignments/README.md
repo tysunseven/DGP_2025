@@ -14,7 +14,7 @@
 
   Deadline: 23:59, 2025-03-09
 
-- [作业二](./assignment2/README.md)：网格数据结构 
+- [作业二](./assignment2/README.md)：高斯曲率、平均曲率计算
 
   [作业二分析](./assignment2/analysis.md)
 
@@ -26,8 +26,14 @@
 
   Deadline: 23:59, 2025-03-29
 
-- [作业四](./assignment4/README.md)：网格分割 
+- [作业四](./assignment4/README.md)：Tutte参数化
 
   [作业四分析](./assignment4/analysis.md)
 
   Deadline: 23:59, 2025-04-09
+
+- [作业五](./assignment5/README.md)：ARAP参数化 
+
+  [作业五分析](./assignment5/analysis.md)
+
+  Deadline: 23:59, 2025-04-19

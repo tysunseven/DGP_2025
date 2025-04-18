@@ -1,15 +1,24 @@
 # Tutte's Embedding
 
 > Michael S. Floater,
+>
 > Parametrization and smooth approximation of surface triangulations,
+>
 > Computer Aided Geometric Design,
+>
 > Volume 14, Issue 3,
+>
 > 1997,
+>
 > Pages 231-250,
+>
 > ISSN 0167-8396,
+>
 > https://doi.org/10.1016/S0167-8396(96)00031-3.
 > (https://www.sciencedirect.com/science/article/pii/S0167839696000313)
+>
 > Abstract: A method based on graph theory is investigated for creating global parametrizations for surface triangulations for the purpose of smooth surface fitting. The parametrizations, which are planar triangulations, are the solutions of linear systems based on convex combinations. A particular parametrization, called shape-preserving, is found to lead to visually smooth surface approximations.
+>
 > Keywords: Surface triangulations; Approximation; Parametrization; Planar graphs; Straight-line drawing
 
 
